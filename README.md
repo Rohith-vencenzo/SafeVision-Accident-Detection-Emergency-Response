@@ -4,7 +4,7 @@
 
 # Traffic Accident Video Detection Using Deep Learning
 
-### A Deep-Learning Decision-Support Prototype for Video-Based Accident Incidents
+### A Deep-Learning Decision-Support System with a Real-Time Phone Alert Pipeline
 
 **Anand Institute of Higher Technology (AIHT) - An Autonomous Institute**
 **Kazhipattur, Chennai**
@@ -12,15 +12,19 @@
 ---
 
 *A local, rule-based temporal decision engine wrapped around an*
-**accident-specific YOLO checkpoint** *to convert raw per-frame detections*
-*into auditable, timestamped incident reports with supporting evidence.*
+**accident-specific YOLO checkpoint**, connected through a*
+***FastAPI + PostgreSQL* backend** *to an Android app that raises a*
+*full-screen, human-reviewable alarm on the handset.*
 
 [![Python](https://img.shields.io/badge/Python-3.13.3-blue?logo=python&logoColor=white)](https://www.python.org/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.11.0%2Bcpu-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
+[![PyTorch](https://img.shields.io/badge/PyTorch-2.11.0%2Bcu128-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
 [![Ultralytics](https://img.shields.io/badge/Ultralytics-8.4.174-00FFFF?logo=ultralytics&logoColor=white)](https://github.com/ultralytics/ultralytics)
 [![OpenCV](https://img.shields.io/badge/OpenCV-4.14.0-5C3EE8?logo=opencv&logoColor=white)](https://docs.opencv.org/4.x/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![Android](https://img.shields.io/badge/Android-Kotlin-3DDC84?logo=android&logoColor=white)](https://developer.android.com/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-18-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
 [![License: Unlicense](https://img.shields.io/badge/License-Unlicense-blue.svg)](LICENSE)
-[![Device](https://img.shields.io/badge/Device-C--only-lightgrey?logo=python&logoColor=white)](https://pytorch.org/)
+[![Device](https://img.shields.io/badge/Device-CUDA%20%7C%20CPU-lightgrey?logo=nvidia&logoColor=white)](https://pytorch.org/)
 
 </div>
 
@@ -59,13 +63,16 @@ full of **isolated false positives** - a parked car, a braking vehicle, a shadow
 a compression artefact - and equally full of **real accidents that are brief and
 partly occluded**.
 
-This project delivers a **local video-analysis framework** that:
+This project delivers a **three-part local system**. The detector is the source of
+evidence, the backend is the source of truth, and the handset is where a human
+actually reviews the claim.
 
-- Runs an **accident-specific YOLO checkpoint** (Ultralytics `yolov11m`, single
-  class `Accident`) over every frame of a local video.
-- Feeds the raw per-frame detections into a **model-independent temporal
-  decision engine** that requires persistence, continuity and a minimum support
-  ratio before a candidate is confirmed - which suppresses isolated spikes.
+**Part 1 - Detector (`Accident_Detection/`)** runs an accident-specific YOLO
+checkpoint (Ultralytics `yolov11m`, single class `Accident`) over a video and:
+
+- Feeds raw per-frame detections into a **model-independent temporal decision
+  engine** that requires persistence, continuity and a minimum support ratio
+  before a candidate is confirmed - which suppresses isolated spikes.
 - Publishes a **versioned incident report bundle** (`result.json` +
   human-readable `report.md`) containing deterministic incident IDs, source and
   checkpoint SHA-256 hashes, full decision history, and rejected/unresolved
@@ -74,13 +81,40 @@ This project delivers a **local video-analysis framework** that:
   (before / strongest / after) so a human reviewer can verify the claim.
 - Optionally writes an **annotated video** with fresh boxes, model scores,
   video time and live temporal state.
-- Runs **fully offline on CPU**, with no cloud dependency and no network calls.
+- Runs **fully offline** on CPU or CUDA, with no cloud dependency.
+
+**Part 2 - Backend (`Accident_Detection/Backend/`, FastAPI + PostgreSQL)** turns a
+confirmed incident into an auditable, reviewable record and an alert:
+
+- Invokes the detector as a **subprocess** - it never imports detector internals -
+  and re-validates the published result, source/checkpoint hashes and evidence
+  bundle integrity.
+- Stores incidents, review actions, location consent and a **durable notification
+  outbox** with bounded retries in PostgreSQL.
+- Delivers pushes through **Firebase Cloud Messaging**, dispatched by a background
+  thread so alerts fire while the server simply runs.
+- Serves evidence frames and reports only from private storage, after a
+  **SHA-256 integrity check** on every download.
+
+**Part 3 - Android app (`College_Proj/CrashPulse/`, Kotlin + Jetpack Compose)** is
+the review surface:
+
+- Raises a **full-screen, ongoing, alarm-category notification** with a
+  slide-to-respond gesture that is deliberately hard to dismiss.
+- Shows the **strongest evidence frame** - the image where detection fired - so
+  the reviewer judges an actual picture, not just a sentence of text.
+- Records **Ignore / Mark reviewed / Proceeded** as backend audit actions, attaches
+  optional location **only after an explicit Proceed**, and offers two one-tap
+  routes to emergency help: **open the dialer with 108 pre-filled**, or **call
+  directly** with a dialer fallback if permission is denied.
 
 > **Honesty statement.** A `confirmed_incident` result means the temporal
 > evidence requirements passed. It is **not** independently verified ground
-> truth, and human review is always required. No labeled held-out dataset
-> ships with this repository, so real-world accuracy on unseen footage is
-> **not yet established**. See [Section 18](#18-limitations-and-future-work).
+> truth, and human review is always required. CrashPulse **never** auto-calls,
+> never sends SMS, never dispatches emergency services, and never tracks
+> location in the background. No labeled held-out dataset ships with this
+> repository, so real-world accuracy on unseen footage is **not yet
+> established**. See [Section 18](#18-limitations-and-future-work).
 
 ---
 
@@ -149,7 +183,7 @@ Transcribed from `models/training-configuration.json`:
 ## 3. Visual Snapshot
 
 Captured from a **real verified run** of this repository on
-`test_clip/accident_demo.mp4` (640x360, 30 FPS). The pair below shows the
+`test_clip/accident_demo2.mp4` (640x360, 30 FPS). The pair below shows the
 temporal engine mid-decision and then confirmed.
 
 <div align="center">
@@ -183,44 +217,78 @@ confusion matrix, full training curves), see the
 
 ## 4. Repository Layout
 
+The detector is self-contained. The backend is nested inside it, and the Android
+app is a **sibling project** one level up.
+
 ```text
-Accident_Detection/
-|-- README.md                       <- You are here
-|-- LICENSE                         <- Unlicense (public domain)
-|-- requirements.txt                <- Pinned Python dependencies
-|-- .gitignore                      <- Excludes weights / videos / artifacts
-|-- config.json                     <- Validated runtime defaults
+College_Proj/
+|-- Accident_Detection/               <- Detector (this directory) + Backend
+|   |-- README.md                     <- You are here
+|   |-- LICENSE                       <- Unlicense (public domain)
+|   |-- requirements.txt              <- Pinned Python dependencies
+|   |-- .gitignore                    <- Excludes weights / videos / artifacts
+|   |-- config.json                   <- Validated runtime defaults
+|   |
+|   |-- main.py                       <- Video analysis CLI
+|   |-- evaluate.py                   <- Labeled whole-video evaluation
+|   |-- benchmark.py                  <- Local processing benchmark
+|   |-- evaluation_manifest.example.json <- Template manifest for labeled data
+|   |
+|   |-- traffic_accident/             <- Modular detector package
+|   |   |-- config.py, cli.py, paths.py <- Validated settings, overrides, paths
+|   |   |-- checkpoint.py, detector.py  <- Checkpoint validation, reusable detector
+|   |   |-- video.py, timestamps.py     <- Video I/O and time provenance
+|   |   |-- preview.py                  <- GUI preview
+|   |   |-- decision.py                 <- Temporal candidate state machine
+|   |   |-- annotation.py, evidence.py  <- Overlays, bounded evidence selection
+|   |   |-- contracts.py, reporting.py  <- Stable identity, validated reports
+|   |   |-- atomic.py, retention.py     <- Safe publication, optional retention
+|   |   |-- integration.py              <- Local callback + simulation interface
+|   |   |-- workflow.py                 <- Processing orchestration
+|   |   `-- evaluate.py, benchmark.py   <- Metrics and throughput measurement
+|   |
+|   |-- Backend/                      <- FastAPI + PostgreSQL alert service
+|   |   |-- app/
+|   |   |   |-- main.py, config.py, db.py, models.py, schemas.py
+|   |   |   |-- security.py, dependencies.py, upload_limits.py
+|   |   |   |-- routers/                <- auth, admin, devices, health,
+|   |   |   |                               incidents, jobs, terms
+|   |   |   |-- services/
+|   |   |   |   |-- detector.py         <- Subprocess adapter (never imports detector)
+|   |   |   |   |-- jobs.py             <- Durable PostgreSQL queue + worker
+|   |   |   |   |-- ingest.py           <- Publishes an external detector run
+|   |   |   |   |-- dispatcher.py       <- Background FCM outbox delivery
+|   |   |   |   |-- notifications.py    <- Fake + Firebase Admin senders
+|   |   |   |   `-- storage.py, result_validator.py
+|   |   |   `-- static/admin/           <- Loopback-only operator console
+|   |   |-- scripts/
+|   |   |   |-- migrate.py, seed_terms.py, bootstrap_admin.py
+|   |   |   |-- check_config.py, check_startup.py
+|   |   |   |-- watch_and_alert.py      <- Run detector -> alert the handset
+|   |   |   `-- dispatch_notifications.py
+|   |   |-- tests/                     <- Backend unit + PostgreSQL suites
+|   |   `-- private-data/              <- Private artifacts (never served raw)
+|   |
+|   |-- tests/                        <- Detector unit / integration suite (108)
+|   |-- docs/                         <- Architecture, rules, schemas, integration
+|   |-- assets/                       <- Logo and verified-run snapshots
+|   |-- models/                       <- Locally supplied checkpoints (.pt ignored)
+|   |-- test_clip/                    <- Locally supplied footage (.mp4 ignored)
+|   |-- outputs/                      <- Annotated videos / redirected JSON
+|   |-- incidents/                    <- Published detector report bundles
+|   `-- logs/                         <- Runtime caches / local simulation records
 |
-|-- main.py                         <- Video analysis CLI
-|-- evaluate.py                     <- Labeled whole-video evaluation
-|-- benchmark.py                    <- Local processing benchmark
-|-- evaluation_manifest.example.json<- Template manifest for labeled data
-|
-|-- traffic_accident/               <- Modular application package
-|   |-- config.py, cli.py, paths.py <- Validated settings, overrides, paths
-|   |-- checkpoint.py, detector.py  <- Checkpoint validation, reusable detector
-|   |-- video.py, timestamps.py     <- Video I/O and time provenance
-|   |-- preview.py                  <- GUI preview
-|   |-- decision.py                 <- Temporal candidate state machine
-|   |-- annotation.py, evidence.py  <- Overlays, bounded evidence selection
-|   |-- contracts.py, reporting.py  <- Stable identity, validated reports
-|   |-- atomic.py, retention.py     <- Safe publication, optional retention
-|   |-- integration.py              <- Local callback + simulation interface
-|   |-- workflow.py                 <- Processing orchestration
-|   `-- evaluate.py, benchmark.py   <- Metrics and throughput measurement
-|
-|-- tests/                          <- Offline unit / integration suite (108)
-|-- docs/                           <- Architecture, rules, schemas, integration
-|   |-- ARCHITECTURE.md, DECISIONS.md
-|   |-- EVALUATION.md, INTEGRATION.md
-|   `-- RESULTS.md, result.schema.json
-|
-|-- assets/                         <- Logo and verified-run snapshots
-|-- models/                         <- Locally supplied checkpoints (.pt ignored)
-|-- test_clip/                      <- Locally supplied footage (.mp4 ignored)
-|-- outputs/                        <- Annotated videos / redirected JSON
-|-- incidents/                      <- Published report bundles
-`-- logs/                           <- Runtime caches / local simulation records
+`-- CrashPulse/                       <- Android app (separate Gradle project)
+    |-- app/src/main/java/com/collegeproj/crashpulse/
+    |   |-- feature/alarm/            <- Full-screen alarm + Proceed/Ignore
+    |   |-- feature/auth/             <- Session state, terms gate
+    |   |-- feature/home/             <- Clip picker, job polling
+    |   |-- feature/notifications/    <- Channel, FCM service, dedupe
+    |   |-- core/network/             <- Retrofit, token refresh
+    |   |-- core/storage/             <- Session + base-URL preferences
+    |   `-- ui/                       <- Compose screens and navigation
+    |-- LAN_RUNBOOK.md, TESTING.md    <- Trusted-LAN demo procedure
+    `-- app/build/outputs/apk/debug/  <- Debug APK artifact
 ```
 
 ---
@@ -330,11 +398,51 @@ detector without retraining it** - and that the resulting system can be
                 +----------------------------------------------------------+
                 |   Optional local callback / simulation-only alert log        |
                 |   (no network request, no dispatch, no emergency action)    |
+                +------------------------------+-----------------------------+
+                                               |
+       ======================= trust boundary =================================
+       The detector runs as a CHILD PROCESS. The backend never imports
+       detector internals and never writes into the detector project.
+       ======================= trust boundary =================================
+                                               |
+                        DetectorAdapter spawns main.py --no-show --json
+                        and re-validates: result schema, source hash,
+                        checkpoint hash, and every evidence frame hash.
+                                               |
+                                               v
                 +----------------------------------------------------------+
+                |                     Backend (FastAPI)                        |
+                |  POST /videos/analyze      -> durable analysis_jobs row     |
+                |  JobWorker (advisory lock, --workers 1 only)               |
+                |  incidents + user_actions + notification_outbox (Postgres)  |
+                |  evidence/report served ONLY from private-data/,           |
+                |    after a SHA-256 integrity check on each download         |
+                +------------------------------+-----------------------------+
+                                               |
+                            confirmed incident (durable outbox row)
+                                               |
+                                               v
+                +----------------------------------------------------------+
+                |            NotificationDispatcher (background)               |
+                |  bounded retries with backoff; FCM_MODE=firebase            |
+                +------------------------------+-----------------------------+
+                                               |  high-priority data-only push
+                                               v
+                +----------------------------------------------------------+
+                |                     Android app (CrashPulse)                 |
+                |  full-screen ongoing notification (CATEGORY_ALARM)           |
+                |  slide-to-respond -> evidence frame + incident summary    |
+                |  Ignore / Mark reviewed / Proceed  -> backend audit trail  |
+                |  Proceed -> optional location, then:                      |
+                |     1) open dialer with 108 pre-filled, or                  |
+                |     2) call now (dialer fallback if permission denied)     |
+                +-------------------------------------------------------------+
 ```
 
 The detector and the temporal engine are **decoupled**: swapping in another
-approved checkpoint requires no change to the decision logic.
+approved checkpoint requires no change to the decision logic. The detector is
+additionally **decoupled from the backend**, which reaches it only through a
+validated subprocess result - so neither project can corrupt the other.
 
 ---
 
@@ -513,9 +621,25 @@ python -m pip install -r requirements.txt
 python -m pip check
 ```
 
-For CUDA, install compatible wheels using the
-[official PyTorch guide](https://pytorch.org/get-started/locally/) first. A
-visible GPU alone does not guarantee the installed PyTorch build supports it.
+### 11.3.1 Optional: Enable the GPU
+
+A CPU-only PyTorch build **will not use your GPU**, however capable the card is.
+Installing the CUDA build of the *same* version is a large but worthwhile win -
+see [Section 16.4](#164-gpu-acceleration-measured).
+
+```text
+python -m pip install --index-url https://download.pytorch.org/whl/cu128 "torch==2.11.0+cu128" "torchvision==0.26.0+cu128"
+python main.py --check-env
+```
+
+Confirm `cuda_available_to_pytorch: true` in the output, then pass
+`--device 0` when running. To revert to CPU-only, reinstall the `+cpu` wheels
+from the first command above. A visible GPU alone does not guarantee the
+installed PyTorch build supports it - always check `--check-env`.
+
+> The Backend shares this environment through `DETECTOR_PYTHON`, so it inherits
+> GPU acceleration too. Only **one** detector should hold the 6 GB of VRAM at a
+> time.
 
 ### 11.4 Supply the Checkpoint
 
@@ -528,7 +652,7 @@ repository.
 
 ```bash
 python main.py --check-env --check-model --print-config
-python main.py --source "test_clip/accident_demo.mp4" --check-source
+python main.py --source "test_clip/accident_demo2.mp4" --check-source
 ```
 
 The first command reports the interpreter, dependency versions, OpenCV runtime
@@ -542,7 +666,7 @@ and decodes the first frame - it is not a full-file integrity check.
 ### 12.1 Analyze and Preview
 
 ```bash
-python main.py --source "test_clip/accident_demo.mp4" --show
+python main.py --source "test_clip/accident_demo2.mp4" --show
 ```
 
 Press **Q** or **Escape**, or close the preview window, to stop early. Early
@@ -552,7 +676,7 @@ runs at *processing speed*, not guaranteed real-time playback.
 ### 12.2 Save Video, Evidence and Reports
 
 ```bash
-python main.py --source "test_clip/accident_demo.mp4" --no-show --save-output --output-dir "outputs/review run" --json
+python main.py --source "test_clip/accident_demo2.mp4" --no-show --save-output --output-dir "outputs/review run" --json
 ```
 
 Creates a uniquely named annotated MP4 plus a report bundle under
@@ -562,7 +686,7 @@ even when annotated-video saving is not requested.
 ### 12.3 Quick CPU Check
 
 ```bash
-python main.py --source "test_clip/accident_demo.mp4" --no-show --no-save --device cpu --imgsz 320 --frame-stride 3 --max-frames 12 --json
+python main.py --source "test_clip/accident_demo2.mp4" --no-show --no-save --device cpu --imgsz 320 --frame-stride 3 --max-frames 12 --json
 ```
 
 Inspects only part of the clip. Smaller images and a larger stride cut compute
@@ -580,11 +704,210 @@ A Windows drive path is **not** a valid argument inside WSL, and vice versa.
 ### 12.5 Redirect JSON to a File
 
 ```bash
-python main.py --source "test_clip/accident_demo.mp4" --no-show --json > "outputs/result.json"
+python main.py --source "test_clip/accident_demo2.mp4" --no-show --json > "outputs/result.json"
 ```
 
 JSON goes to **stdout**; progress and errors go to **stderr**. Create the
 destination directory first, and do not merge the two streams when parsing.
+
+### 12.6 End-to-End: Detector Run -> Phone Alarm
+
+Running `python main.py` on its own **never reaches the phone**. It writes report
+bundles and stops, without creating a backend record or sending anything. The
+alarm path only exists through the Backend.
+
+#### One-time Backend setup
+
+The Backend needs its **own** environment and a live PostgreSQL database - it
+never reuses the detector `.venv` and never falls back to SQLite.
+
+```powershell
+cd "Accident_Detection\Backend"
+py -3.13 -m venv .venv_backend
+.\.venv_backend\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
+
+# Copy .env.example to .env and replace every CHANGE_ME value, then point
+# DETECTOR_ROOT / DETECTOR_PYTHON / DETECTOR_ENTRYPOINT / DETECTOR_CONFIG /
+# DETECTOR_MODEL at this detector, and generate TOKEN_ENCRYPTION_KEY:
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+
+python -m scripts.check_config      # validates without printing secrets
+python -m scripts.migrate          # creates the PostgreSQL schema
+python -m scripts.bootstrap_admin --login-id admin
+```
+
+Seed a Terms version from a real local text file (published terms are immutable;
+changing them later requires a new version):
+
+```powershell
+python -m scripts.seed_terms --version 1.0 --file .\local-terms.txt
+```
+
+Then open `http://127.0.0.1:8000/admin` and create a **non-admin** mobile
+account. There is **no public sign-up endpoint**, so the phone cannot sign in
+until an administrator provisions it.
+
+#### Run the demonstration
+
+Open **two** PowerShell windows. Both must start from the `Backend` directory.
+
+```powershell
+# ---- Terminal 1: the alert server (leave running) ----
+Set-Location "C:\Users\sivap\Downloads\College_Proj\Accident_Detection\Backend"
+.\.venv_backend\Scripts\python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
+```
+
+```powershell
+# ---- Terminal 2: run the video and alert the phone ----
+Set-Location "C:\Users\sivap\Downloads\College_Proj\Accident_Detection\Backend"
+.\.venv_backend\Scripts\python.exe -m scripts.watch_and_alert --source "..\test_clip\accident_demo2.mp4"
+```
+
+Two flags on the server command are **not optional**:
+
+| Flag | Why it is required |
+|---|---|
+| `--host 0.0.0.0` | The default `127.0.0.1` is unreachable from the handset |
+| `--workers 1` | The queue owner holds a **PostgreSQL advisory lock**; a second worker is refused at startup by design |
+
+Expected console output on Terminal 2:
+
+```text
+source        : ...\test_clip\accident_demo2.mp4
+alert recipient: <DETECTOR_ALERT_LOGIN>
+notifications : FCM
+
+=== pass 1/1 ===
+decision      : confirmed_incident
+incidents     : 1 confirmed
+incident <uuid>: queued for review
+```
+
+If `decision` reports `no_confirmed_incident`, **no alarm is raised** - that is
+correct behaviour, not a failure. Only a *confirmed* candidate alerts.
+
+#### Alerting immediately with `--live`
+
+By default the detector's report is published **once, at the end of the run**,
+so a confirmation at t=1s stays invisible until the whole clip has been
+processed. `--live` changes that: the alarm is raised the instant the temporal
+rules pass, while analysis is still running.
+
+```powershell
+# Terminal 2, with Terminal 1 already running
+.\.venv_backend\Scripts\python.exe -m scripts.watch_and_alert `
+  --source "..\test_clip\accident_demo2.mp4" --device 0 --show --live
+```
+
+Measured on `accident_demo2.mp4` with CUDA: the alert was raised for a
+confirmation at video time **0.960s**, at wall-clock **8.4s**, while the run
+itself finished at **13.9s** - so roughly **4.3 seconds of the clip were never
+waited on**. On a longer clip that gap grows in proportion to its length.
+
+```
+[   8.4s] Live alert raised for candidate 1 at video time 0.960s.
+[  12.7s] Processing elapsed: 12.219s
+TOTAL WALL: 13.9 s
+```
+
+How it works, and what changes:
+
+| Aspect | Default | With `--live` |
+|---|---|---|
+| Alert timing | After the clip finishes | At the moment the rules pass |
+| Endpoint used | End-of-run ingest | `POST /api/v1/detector/alert` |
+| Evidence available | before + strongest + after | **strongest frame only** |
+| Alerts per incident | 1 | 1 (end-of-run ingest is skipped) |
+| Requires the Backend running | No | **Yes** |
+
+`--live` needs `DETECTOR_ALERT_TOKEN` in `Backend/.env` (the detector sends it
+as `X-Detector-Token`, compared in constant time). If the token is missing, or
+the Backend is not reachable, the alert is **silently skipped** and the normal
+end-of-run report is still produced - a broken alert service never fails an
+analysis or changes the published result.
+
+> Only the **strongest frame** exists at confirmation time; the before/after
+> context frames are chosen when the run ends. That is why the alarm shows one
+> image. A live alert also records `complete_video_processed: false` and
+> `termination_reason: "live_alert_confirmed"`, so it is never mistaken for a
+> finished whole-video analysis.
+>
+> Retries are idempotent, but **replaying a clip is not**. Each detector
+> invocation mints a fresh `run_token`, and the incident identity is derived
+> from `run_token + source SHA-256 + confirmation timestamp + frame index`. A
+> retried POST from the same run therefore returns the original incident
+> instead of re-alerting, while deliberately running the same clip again
+> produces a genuinely new incident - which is what a demonstration needs.
+> (Deriving identity from the clip alone was the earlier behaviour, and it
+> silently deduplicated every replay after the first.)
+
+> **The Backend path runs on CPU by default, and ignores your GPU.** The
+> detector command built by `DetectorAdapter` does not pass `--device`, so the
+> run follows `config.json`, which ships `"device": "cpu"`. Installing CUDA
+> wheels therefore does **not** speed up this workflow. To use the GPU, change
+> `config.json` to `"device": "0"` and restart Terminal 1 - see
+> [Section 16.4](#164-gpu-acceleration-measured) for the measured difference.
+> Expect roughly 5x slower analysis while it is left on CPU.
+
+`watch_and_alert` reuses the same `DetectorAdapter` as the upload pipeline, so
+the detector project is never imported or modified. Useful flags:
+
+| Flag | Purpose |
+|---|---|
+| `--login <id>` | Alert recipient; defaults to `DETECTOR_ALERT_LOGIN` |
+| `--repeat N` | Analyze the clip N times (a stand-in for a continuous feed) |
+| `--no-notify` | Create incidents but suppress delivery - useful for testing |
+
+The detector runs headless here (`--no-show`), so **no preview window appears on
+the PC**. The phone is the review surface.
+
+#### On the handset
+
+In CrashPulse **Settings** (or **Server settings** on the login screen, *before*
+signing in) set:
+
+```text
+http://<Windows-LAN-IP>:8000/api/v1/
+```
+
+A physical phone must **not** use `10.0.2.2` - that alias only resolves inside
+the Android emulator. Get the PC address with:
+
+```powershell
+Get-NetIPAddress -AddressFamily IPv4 |
+  Where-Object { $_.IPAddress -notlike '127.*' -and $_.PrefixOrigin -ne 'WellKnown' } |
+  Select-Object IPAddress, InterfaceAlias
+```
+
+Allow the port on the **private** profile only:
+
+```powershell
+New-NetFirewallRule -DisplayName "CrashPulse 8000 LAN" -Direction Inbound `
+  -Protocol TCP -LocalPort 8000 -Action Allow -Profile Private
+```
+
+Build and install the debug APK, then verify the flow:
+
+```powershell
+cd "..\CrashPulse"
+.\gradlew.bat :app:assembleDebug
+adb install -r app\build\outputs\apk\debug\app-debug.apk
+```
+
+1. Sign in with the provisioned mobile account.
+2. Accept the current Terms version.
+3. Grant the notification permission when prompted.
+4. Confirm `/health/ready` reports ready.
+
+Then run `watch_and_alert`. A confirmed incident raises an ongoing alarm-category
+notification; tapping it opens the alarm with the **strongest evidence frame**.
+
+> **FCM is mandatory for background, locked and screen-off delivery.** With
+> `FCM_MODE=disabled` the outbox is left `PENDING` and the app will only notice an
+> incident while it is open and polling. Credentials belong outside Git
+> (`Backend/secrets/`, gitignored); `FCM_MODE=firebase` plus
+> `FIREBASE_CREDENTIALS_FILE` are required for real sending.
 
 ---
 
@@ -728,12 +1051,11 @@ Per-frame detection validation for the checkpoint, from the model export's
 | mAP@0.50 | 0.987740 |
 | mAP@0.50:0.95 | 0.857349 |
 
-### 16.2 Local CPU Measurements
+### 16.2 CPU Measurements
 
-Two independent runs on the same clip, **CPU-only PyTorch**, each including
-model initialization. These are *not* warm-steady-state numbers and are not
-directly comparable to each other, because the inference settings differ
-substantially.
+All figures below are **partial-clip CPU measurements, not real-time
+guarantees**. They include model initialization, and depend on storage, machine
+load, image size and sampling.
 
 **Run A - WSL2 / Ubuntu, Python 3.14.4**
 
@@ -747,14 +1069,7 @@ substantially.
 | Wall elapsed time | 41.5091 s |
 | Decoded throughput (wall) | 2.8909 fps |
 | Inferred throughput (wall) | 0.9636 fps |
-| Inference-only throughput | 1.8170 fps |
 | Wall time / processed duration | 10.46x |
-
-Reproduce a comparable run:
-
-```bash
-python benchmark.py --source "test_clip/accident_demo.mp4" --max-frames 120 --imgsz 320 --frame-stride 3 --device cpu --cpu-threads 4 --json
-```
 
 **Run B - Windows 11, Python 3.13.3**
 
@@ -767,13 +1082,10 @@ python benchmark.py --source "test_clip/accident_demo.mp4" --max-frames 120 --im
 | Processed clip duration | 5.0000 s |
 | Wall elapsed time | 21.6030 s |
 | Decoded throughput (wall) | 6.9442 fps |
-| Wall time / processed duration | 4.32x |
 
 ### 16.3 Platform Comparison (Matched Settings)
 
-Runs A and B are **not** directly comparable - Run B infers every frame at
-double the image size. To isolate the platform, Run C repeats **exactly Run
-B's settings** on WSL2:
+Run C repeats **exactly Run B's settings** on WSL2, isolating the platform:
 
 | Run | Platform | Python | imgsz / stride | Frames | Wall time | Throughput |
 |---|---|---|---|---:|---:|---:|
@@ -783,25 +1095,72 @@ B's settings** on WSL2:
 
 Both runs confirmed the **same incident ID** (`inc_639ec97df03407b9bb56f36f`) at
 the same peak model score, so the difference is throughput only - **not** a
-difference in output.
+difference in output. The cause was not isolated systematically (plausible
+contributors: loopback filesystem I/O through `/mnt/c`, build flavour, BLAS
+threading), so treat this as **an observation, not a controlled benchmark**.
 
-Under identical settings the native Windows build ran **~2.9x faster** than
-WSL2. The cause was not isolated systematically (plausible contributors:
-loopback filesystem I/O through `/mnt/c`, build flavour, and BLAS threading), so
-treat this as **an observation on this machine, not a controlled benchmark**.
+### 16.4 GPU Acceleration (Measured)
 
-> All three runs are **partial-clip CPU measurements, not real-time
-> guarantees**. Results depend on initialization, storage, machine load, image
-> size, and sampling. **GPU execution was not measured at all.**
+Reference hardware: **NVIDIA GeForce RTX 4050 Laptop GPU**, 6 GB VRAM, compute
+capability 8.9, driver 610.74; **AMD Ryzen 7 8845HS**, 8 cores / 16 threads.
 
-### 16.4 Verification Status
+The stock environment shipped `torch 2.11.0+cpu`, so the GPU was never used.
+Installing the CUDA build of the **same version** unlocked it:
+
+```bash
+pip install --index-url https://download.pytorch.org/whl/cu128 "torch==2.11.0+cu128" "torchvision==0.26.0+cu128"
+```
+
+Measured on `test_in_heavy_traffic.mp4`, 400 frames, `imgsz 640`, stride 1,
+identical settings except device:
+
+| Run | Device | PyTorch build | Elapsed | Throughput |
+|---|---|---|---:|---:|
+| D | CPU, 4 threads (stock default) | `2.11.0+cpu` | 91.4 s | 4.4 fps |
+| E | CPU, 8 threads | `2.11.0+cpu` | 19.2 s\* | - |
+| F | **CUDA, `device=0`** | `2.11.0+cu128` | **18.0 s** | **22.2 fps** |
+
+\*Run E was measured over 60 frames, so it is **not** directly comparable to
+Runs D and F.
+
+**Enabling CUDA was a 5.1x speedup over the stock CPU default.** Two findings
+worth recording:
+
+1. **Short clips disguise the GPU benefit.** On a 60-frame sample the GPU looked
+   barely faster than CPU (10.7 s vs 13.4 s), because CUDA context
+   initialization costs roughly 7-8 s. Judge acceleration only past ~200 frames,
+   or the measurement is meaningless.
+2. **`cpu_threads: 4` was leaving half the machine idle.** The default config
+   uses 4 threads on an 8-core CPU. Raising it is a free ~8% before any hardware
+   change is considered.
+
+```bash
+python main.py --source "test_in_heavy_traffic.mp4" --show --device 0
+python main.py --check-env    # reports cuda_available_to_pytorch
+```
+
+> **Still not real-time.** 22.2 fps inference against a 30 fps source means
+> `--show` plays at roughly **0.7x** real speed - smoother, but still lagging.
+> Genuine real-time needs a smaller model or a TensorRT export, which is a real
+> code change rather than a configuration one. **VRAM is 6 GB and shared**: do
+> not run the preview and the Backend concurrently while expecting both to stay
+> fast.
+>
+> `config.json` deliberately still says `device: "cpu"`. `resolve_device` fails
+> loudly instead of falling back, so defaulting to CUDA would break a CPU-only
+> machine - including the Backend, which shares this environment. Pass
+> `--device 0` explicitly.
+
+### 16.5 Verification Status
 
 | Check | Recorded Result |
 |---|---|
-| Unit and local integration suite | 108 tests passed |
+| Detector unit and local integration suite | 108 tests passed |
+| Backend unit + API contract suite | 20 passed, 7 skipped (no `TEST_DATABASE_URL`) |
 | Dependency consistency (`pip check`) | Passed |
 | Native Windows run | Validated, identical incident ID to WSL run |
-| Real video outputs and selected evidence | Validated locally |
+| CUDA run | Validated, identical incident ID to CPU run |
+| Backend -> incident -> outbox -> evidence integrity | Validated locally |
 | Unseen-video accuracy / held-out metrics | **Not yet established** |
 
 Scripted and synthetic tests verify **software behaviour**, not real-world
@@ -853,8 +1212,28 @@ interrupted or frame-limited runs correctly report **partial** coverage.
   severity are not discriminated, and no injury or medical inference is made.
 - **No real-world accuracy measurement.** No labeled held-out dataset ships with
   this project; the reported figures are upstream per-frame metrics only.
-- **Not an emergency system.** The simulation interface is explicitly local and
-  non-dispatching. Human review is mandatory before any operational use.
+- **The alarm cannot be made un-skippable.** No Android app can guarantee this.
+  On **Android 14+ (API 34+)** full-screen intents are restricted to calling and
+  alarm-category apps, and `canUseFullScreen()` returns `false` once the user
+  disables it. Do Not Disturb, battery optimisation, per-app notification
+  permission and OEM background rules can all suppress the alert. The
+  slide-to-respond gesture and an ongoing notification are the honest ceiling.
+- **Push delivery is best effort.** FCM can be delayed or dropped; a background
+  dispatcher with bounded retries improves this but does not eliminate it. With
+  `FCM_MODE=disabled` there is **no** background delivery at all.
+- **Screen-off wake is not guaranteed** on a device idle long enough to enter
+  Doze, and vendor battery managers may block the app entirely.
+- **`ACTION_CALL` needs the `CALL_PHONE` runtime permission.** If it is denied the
+  app falls back to `ACTION_DIAL`, so the call is never placed without the user's
+  involvement. Direct-call capability is also restricted by app-store policy.
+- **Not real-time on the demonstrated hardware.** 22.2 fps inference against a
+  30 fps source plays at roughly 0.7x speed. Multi-stream use is limited by the
+  6 GB of shared VRAM.
+- **Not an emergency system.** CrashPulse never auto-calls, never sends SMS, never
+  dispatches emergency services, and never tracks location in the background.
+  Location is attached only after an explicit Proceed and is labelled as the
+  *phone's current location, not the crash location*. Human review is mandatory
+  before any operational use.
 
 ### 18.2 Planned Extensions
 
