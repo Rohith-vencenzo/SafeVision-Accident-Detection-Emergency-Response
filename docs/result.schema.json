@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:traffic-accident:video-result:1.0",
+  "title": "Traffic-accident video result v1.0",
+  "description": "Temporal model-evidence decisions requiring human review, not verified ground truth.",
+  "type": "object",
+  "required": ["schema_version", "project_version", "analysis_algorithm", "run_id", "created_at_utc", "source", "model", "accident_detected", "incident_decision", "confirmation_meaning", "complete_video_processed", "termination_reason", "incidents", "rejected_candidates", "unresolved_candidates", "decision_state_history", "decision_diagnostics", "inference_config", "decision_config", "overlay_config", "reporting_config", "camera_metadata", "artifact_paths", "timings", "timing_scope", "warnings", "limitations", "retention_policy", "decoded_frames", "inferred_frames", "frame_observations", "annotated_video"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "project_version": {"type": "string"},
+    "analysis_algorithm": {"const": "temporal_rules_v1"},
+    "run_id": {"type": "string", "pattern": "^run_[0-9a-f]{32}$"},
+    "created_at_utc": {"type": "string", "format": "date-time"},
+    "source": {
+      "type": "object",
+      "required": ["path", "sha256", "size_bytes", "width", "height", "effective_fps", "fps_is_assumed"],
+      "properties": {
+        "path": {"type": "string"}, "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 1},
+        "width": {"type": "integer", "minimum": 1}, "height": {"type": "integer", "minimum": 1},
+        "effective_fps": {"type": "number", "exclusiveMinimum": 0}, "fps_is_assumed": {"type": "boolean"}
+      }
+    },
+    "model": {
+      "type": "object", "required": ["path", "task", "class_names", "accident_class_ids", "sha256"],
+      "properties": {"path": {"type": "string"}, "task": {"const": "detect"}, "sha256": {"$ref": "#/$defs/sha256"}, "class_names": {"type": "object"}, "accident_class_ids": {"type": "array", "minItems": 1, "items": {"type": "integer", "minimum": 0}}}
+    },
+    "accident_detected": {"type": ["boolean", "null"]},
+    "incident_decision": {"enum": ["confirmed_incident", "no_confirmed_incident", "inconclusive"]},
+    "confirmation_meaning": {"type": "string"},
+    "complete_video_processed": {"type": "boolean"},
+    "termination_reason": {"enum": ["end_of_video", "max_frames", "stopped_by_user", "decode_stopped_early"]},
+    "decoded_frames": {"type": "integer", "minimum": 1},
+    "inferred_frames": {"type": "integer", "minimum": 1},
+    "incidents": {"type": "array", "items": {"allOf": [{"$ref": "#/$defs/candidate"}, {"type": "object", "properties": {"state": {"const": "CONFIRMED"}, "incident_id": {"type": "string", "pattern": "^inc_[0-9a-f]{24}$"}, "supporting_frame_count": {"type": "integer", "minimum": 2}, "confirmed_at_seconds": {"type": "number", "minimum": 0}, "confirmation_evidence": {"type": "object"}}}]}},
+    "rejected_candidates": {"type": "array", "items": {"allOf": [{"$ref": "#/$defs/candidate"}, {"type": "object", "properties": {"state": {"const": "FALSE_ALARM"}, "incident_id": {"type": "null"}, "evidence_frames": {"maxItems": 0}}}]}},
+    "unresolved_candidates": {"type": "array", "items": {"allOf": [{"$ref": "#/$defs/candidate"}, {"type": "object", "properties": {"state": {"enum": ["POSSIBLE", "VERIFYING"]}, "incident_id": {"type": "null"}, "evidence_frames": {"maxItems": 0}}}]}},
+    "decision_state_history": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/transition"}},
+    "decision_diagnostics": {"type": "object"},
+    "inference_config": {"type": "object"}, "decision_config": {"type": "object"},
+    "overlay_config": {"type": "object"}, "reporting_config": {"type": "object"},
+    "camera_metadata": {
+      "type": "object", "additionalProperties": false, "required": ["origin", "camera_id", "location_label"],
+      "properties": {"origin": {"const": "registered_metadata"}, "camera_id": {"type": ["string", "null"]}, "location_label": {"type": ["string", "null"]}}
+    },
+    "artifact_paths": {
+      "type": "object", "additionalProperties": false, "required": ["run_directory", "json_report", "human_report"],
+      "properties": {"run_directory": {"type": ["string", "null"]}, "json_report": {"type": ["string", "null"]}, "human_report": {"type": ["string", "null"]}}
+    },
+    "annotated_video": {"type": ["string", "null"]}, "frame_observations": {"type": "array"},
+    "timings": {"type": "object", "required": ["elapsed_seconds", "model_setup_seconds", "inference_seconds", "source_fingerprint_seconds", "evidence_seconds"], "additionalProperties": {"type": "number", "minimum": 0}},
+    "timing_scope": {"type": "string"}, "warnings": {"type": "array", "items": {"type": "string"}}, "limitations": {"type": "array", "items": {"type": "string"}}, "retention_policy": {"type": "object"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "transition": {"type": "object", "required": ["state", "timestamp_seconds", "candidate_number", "reason"], "properties": {"state": {"enum": ["NORMAL", "POSSIBLE", "VERIFYING", "CONFIRMED", "FALSE_ALARM"]}, "timestamp_seconds": {"type": "number", "minimum": 0}, "candidate_number": {"type": ["integer", "null"]}, "reason": {"type": "string"}}},
+    "evidence": {
+      "type": "object", "required": ["role", "path", "image_kind", "frame_index", "timestamp_seconds", "timestamp_source", "sha256", "selection_target_seconds", "offset_from_strongest_seconds", "context_limited"],
+      "properties": {"role": {"enum": ["before", "strongest", "after"]}, "path": {"type": "string", "pattern": "^evidence/inc_[0-9a-f]{24}/(before|strongest|after)\\.jpg$"}, "image_kind": {"const": "source_frame"}, "frame_index": {"type": "integer", "minimum": 0}, "timestamp_seconds": {"type": "number", "minimum": 0}, "timestamp_source": {"enum": ["decoder", "fps_fallback"]}, "sha256": {"$ref": "#/$defs/sha256"}, "selection_target_seconds": {"type": "number"}, "offset_from_strongest_seconds": {"type": "number"}, "context_limited": {"type": "boolean"}}
+    },
+    "candidate": {
+      "type": "object", "required": ["candidate_number", "candidate_id", "incident_id", "state", "start_seconds", "end_seconds", "closed_at_seconds", "closure_reason", "confirmed_at_seconds", "confirmation_evidence", "supporting_frame_count", "observed_frame_count", "confidence_evidence", "strongest_frame", "support_frames", "state_history", "diagnostic_reasons", "model_reference", "evidence_frames", "evidence_status"],
+      "properties": {"candidate_number": {"type": "integer", "minimum": 1}, "candidate_id": {"type": "string", "pattern": "^cand_[0-9a-f]{24}$"}, "incident_id": {"type": ["string", "null"]}, "state": {"enum": ["POSSIBLE", "VERIFYING", "CONFIRMED", "FALSE_ALARM"]}, "start_seconds": {"type": "number", "minimum": 0}, "end_seconds": {"type": "number", "minimum": 0}, "closed_at_seconds": {"type": "number", "minimum": 0}, "confirmed_at_seconds": {"type": ["number", "null"]}, "confirmation_evidence": {"type": ["object", "null"]}, "supporting_frame_count": {"type": "integer", "minimum": 1}, "observed_frame_count": {"type": "integer", "minimum": 1}, "confidence_evidence": {"type": "object"}, "strongest_frame": {"type": "object"}, "support_frames": {"type": "array", "minItems": 1}, "state_history": {"type": "array", "items": {"$ref": "#/$defs/transition"}}, "diagnostic_reasons": {"type": "array", "items": {"type": "string"}}, "model_reference": {"type": "object"}, "evidence_frames": {"type": "array", "maxItems": 3, "items": {"$ref": "#/$defs/evidence"}}, "evidence_status": {"enum": ["saved", "partial", "unavailable", "disabled", "not_applicable"]}}
+    }
+  }
+}

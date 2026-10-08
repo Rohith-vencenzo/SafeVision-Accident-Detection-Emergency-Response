@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "model": {
+    "weights": "models/yolov11.pt",
+    "accident_classes": ["Accident"]
+  },
+  "paths": {
+    "test_videos": "test_clip",
+    "output_videos": "outputs",
+    "incidents": "incidents",
+    "logs": "logs"
+  },
+  "inference": {
+    "confidence": 0.4,
+    "image_size": 640,
+    "frame_stride": 1,
+    "device": "cpu",
+    "max_frames": null,
+    "cpu_threads": 4
+  },
+  "video": {
+    "fallback_fps": 30.0,
+    "show": false,
+    "save_output": false
+  },
+  "decision": {
+    "support_confidence": 0.6,
+    "window_seconds": 1.5,
+    "min_support_frames": 3,
+    "min_support_span_seconds": 0.5,
+    "min_positive_ratio": 0.6,
+    "min_consecutive_frames": 3,
+    "max_sample_gap_seconds": 0.5,
+    "event_gap_seconds": 1.0
+  },
+  "overlay": {
+    "enabled": true,
+    "show_boxes": true,
+    "font_scale": 0.55,
+    "line_thickness": 2,
+    "banner_opacity": 0.8,
+    "position": "bottom"
+  },
+  "reporting": {
+    "enabled": true,
+    "save_evidence": true,
+    "evidence_context_seconds": 1.0,
+    "jpeg_quality": 90,
+    "retention_max_runs": null,
+    "retention_days": null
+  },
+  "registered_metadata": {
+    "camera_id": null,
+    "location_label": null
+  }
+}

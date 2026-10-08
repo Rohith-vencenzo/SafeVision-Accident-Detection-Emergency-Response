@@ -1,0 +1,48 @@
+.venv*/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+.env
+.env.*
+!.env.example
+*.pt
+*.onnx
+*.engine
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+*.m4v
+outputs/*
+!outputs/.gitkeep
+incidents/*
+!incidents/.gitkeep
+logs/*
+!logs/.gitkeep
+test_clip/*
+!test_clip/.gitkeep
+models/*
+!models/.gitkeep
+!models/training-configuration.json
+!models/performance-metrics.json
+
+# Windows / editor / tooling noise
+Thumbs.db
+Desktop.ini
+.vscode/
+.idea/
+*.log
+
+# Real manifest holds local absolute video paths; only the example is committed
+evaluation_manifest.json
+
+# On-Going progress are can not pushed, It is Intentionally done (don't modify)
+/tests
+*.md
+# Re-include the docs the README links to. Must target the files (docs/*.md),
+# not the directory: a bare !docs/ would not undo the *.md rule above.
+!README.md
+!docs/*.md

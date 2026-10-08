@@ -1,0 +1,6 @@
+# Install the appropriate CPU/CUDA torch wheel first (see README.md).
+torch>=2.9,<2.12
+torchvision>=0.24,<0.27
+ultralytics>=8.4,<8.5
+opencv-python>=4.12,<5
+numpy>=2.2,<3

@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "videos": [
+    {
+      "id": "replace_with_unique_video_id",
+      "path": "test_clip/your_complete_clip.mp4",
+      "label": "accident",
+      "split": "calibration",
+      "camera_id": "registered_camera_or_null",
+      "location_id": "registered_location_or_null",
+      "events": [
+        {"start_seconds": 12.5, "end_seconds": 16.0}
+      ]
+    },
+    {
+      "id": "replace_with_normal_video_id",
+      "path": "test_clip/your_normal_clip.mp4",
+      "label": "normal",
+      "split": "test",
+      "camera_id": null,
+      "location_id": null,
+      "events": []
+    }
+  ]
+}
