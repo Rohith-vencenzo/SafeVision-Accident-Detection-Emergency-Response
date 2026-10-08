@@ -14,6 +14,7 @@ from .config import ProjectConfig, load_config
 from .diagnostics import check_environment
 from .errors import SetupError
 from .integration import SimulationAlertSink
+from .live_alert import LiveAlertEmitter
 from .paths import resolve_cli_path
 from .video import check_source
 from .workflow import analyze_video, human_summary
@@ -39,6 +40,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--retention-days", type=float, help="Expire old verified report bundles; disabled by default")
     parser.add_argument("--simulate-alerts", action="store_true", help="Write local simulation-only incident events; no network/emergency action")
     parser.add_argument("--simulation-alert-log", type=Path, help="JSONL path for --simulate-alerts (default: logs/simulation-alerts.jsonl)")
+    parser.add_argument("--alert-webhook", help="POST an alert the instant the temporal engine confirms, instead of only at run end")
+    parser.add_argument("--alert-token", help="Shared secret sent as X-Detector-Token with --alert-webhook")
     parser.add_argument("--json", action="store_true", help="Print one machine-readable result; logs/errors stay on stderr")
     parser.add_argument("--confidence", "--conf", dest="confidence", type=float, help="Detection score threshold (0, 1]")
     parser.add_argument("--imgsz", "--image-size", dest="image_size", type=int, help="Inference image size (multiple of 32)")
@@ -138,7 +141,9 @@ def main(argv: list[str] | None = None) -> int:
                 result = analyze_video(source, config, output=output,
                                        progress=lambda message: print(message, file=sys.stderr),
                                        callback=(SimulationAlertSink(resolve_cli_path(args.simulation_alert_log, config.root))
-                                                 if args.simulate_alerts else None))
+                                                 if args.simulate_alerts else None),
+                                       live_alert=(LiveAlertEmitter(args.alert_webhook, args.alert_token or "")
+                                                   if args.alert_webhook else None))
         if diagnostic or args.json:
             print(json.dumps(result, indent=2, allow_nan=False))
         else:

@@ -46,3 +46,8 @@ evaluation_manifest.json
 # not the directory: a bare !docs/ would not undo the *.md rule above.
 !README.md
 !docs/*.md
+# Backend/README.md links to these two for endpoint contracts and operations,
+# so excluding them would leave broken references for anyone cloning.
+# Backend/TASK.md stays excluded, matching the root TASK.md decision above.
+!Backend/API.md
+!Backend/RUNBOOK.md

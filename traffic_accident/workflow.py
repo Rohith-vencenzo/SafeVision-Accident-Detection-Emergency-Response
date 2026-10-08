@@ -4,31 +4,61 @@ from contextlib import ExitStack
 from dataclasses import asdict
 from pathlib import Path
 from time import perf_counter
+from uuid import uuid4
 from typing import Any, Callable
 
 from .annotation import annotate_frame
 from .config import ProjectConfig
 from .contracts import prepare_result
 from .detector import Detector, UltralyticsDetector
-from .decision import TemporalDecisionEngine
+from .decision import DecisionState, TemporalDecisionEngine
 from .evidence import FrameStamp
 from .fingerprint import fingerprint_source
 from .integration import CallbackDispatcher, IncidentCallback
+from .live_alert import LiveAlertEmitter
 from .preview import VideoPreview
 from .reporting import publish_result
 from .summaries import human_summary
 from .video import VideoOutput, VideoReader
 
 
+def _encode_jpeg(image: Any) -> str | None:
+    """JPEG-encode one frame for the live alert; None if it cannot be encoded.
+
+    JPEG is used deliberately: the Backend evidence endpoint only serves
+    before/strongest/after .jpg, so this avoids an image re-encode on the
+    receiver. Quality matches the configured evidence quality where possible.
+    """
+    if image is None:
+        return None
+    try:
+        import base64
+
+        from .video import get_cv2
+
+        cv2 = get_cv2()
+        ok, buffer = cv2.imencode(".jpg", image, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+        if not ok:
+            return None
+        return base64.b64encode(buffer.tobytes()).decode("ascii")
+    except Exception:
+        # An unencodable frame must not interrupt analysis.
+        return None
+
+
 def analyze_video(source: Path, config: ProjectConfig, *, output: Path | None = None,
                   progress: Callable[[str], None] | None = None,
                   detector: Detector | None = None,
-                  callback: IncidentCallback | None = None) -> dict[str, Any]:
+                  callback: IncidentCallback | None = None,
+                  live_alert: "LiveAlertEmitter | None" = None) -> dict[str, Any]:
     """Process source frames once, sample inference, and retain positive observations.
 
     max_frames counts decoded source frames. Saving always writes every decoded
     frame at original dimensions/FPS, regardless of inference stride. The optional
     detector parameter supports small offline integration fixtures.
+
+    ``live_alert`` is opt-in and only receives an alert when a candidate is
+    confirmed mid-run; the published result is unchanged either way.
     """
     started = perf_counter()
     options = config.inference
@@ -43,6 +73,13 @@ def analyze_video(source: Path, config: ProjectConfig, *, output: Path | None = 
     inference_count = 0
     inference_seconds = 0.0
     strongest: dict[str, Any] | None = None
+    # Retained only for the live alert, and only for the single best frame seen
+    # so far, so the alarm can show the frame that actually triggered it.
+    strongest_image: Any = None
+    alerted_candidates = 0
+    # Fresh per invocation, so re-running the SAME clip still raises a new alert
+    # while a retried POST from THIS run stays idempotent.
+    run_token = uuid4().hex
     last_timestamp: float | None = None
     reason = "end_of_video"
     with ExitStack() as resources:
@@ -89,6 +126,28 @@ def analyze_video(source: Path, config: ProjectConfig, *, output: Path | None = 
                     if strongest is None or score > strongest["confidence"]:
                         strongest = {"frame_index": packet.index, "timestamp_seconds": packet.timestamp_seconds,
                                       "confidence": score, "timestamp_source": packet.timestamp_source}
+                        if live_alert is not None:
+                            strongest_image = packet.image
+                # Alert the instant the rules pass, rather than waiting for the
+                # end-of-run publish. Each candidate alerts at most once, and
+                # the confirmation time is this frame's video timestamp.
+                if live_alert is not None:
+                    live_state = engine.snapshot()
+                    if live_state["state"] == DecisionState.CONFIRMED.value and live_state["confirmed_count"] > alerted_candidates:
+                        alerted_candidates = live_state["confirmed_count"]
+                        live_alert.emit({
+                            "schema": "crashpulse_live_alert/1",
+                            "run_token": run_token,
+                            "source_path": str(source),
+                            "source_sha256": fingerprint.sha256,
+                            "confirmed_count": alerted_candidates,
+                            "confirmed_at_seconds": packet.timestamp_seconds,
+                            "frame_index": packet.index,
+                            "strongest": strongest,
+                            "image_jpeg_base64": _encode_jpeg(strongest_image) if strongest_image is not None else None,
+                        })
+                        if progress:
+                            progress(f"Live alert raised for candidate {alerted_candidates} at video time {packet.timestamp_seconds:.3f}s.")
             else:
                 engine.advance(packet.timestamp_seconds)
             if writer is not None or preview is not None:
