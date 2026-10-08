@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CrashPulse Local Admin</title>
+  <link rel="stylesheet" href="/admin/assets/admin.css">
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <p class="eyebrow">LOCAL DEVELOPMENT TOOL</p>
+      <h1>CrashPulse operator console</h1>
+      <p class="notice">This page creates real PostgreSQL accounts. Keep it on the trusted local machine; never expose it publicly.</p>
+    </header>
+    <p id="message" role="status" aria-live="polite"></p>
+    <section class="card" id="login-card">
+      <h2>Administrator login</h2>
+      <form id="login-form">
+        <label>Login ID <input name="login_id" required autocomplete="username"></label>
+        <label>Password <input name="password" type="password" required autocomplete="current-password"></label>
+        <button>Sign in</button>
+      </form>
+    </section>
+    <section class="card hidden" id="console-card">
+      <div class="row"><h2>Mobile accounts</h2><button class="secondary" id="logout">Sign out</button></div>
+      <form id="create-form">
+        <label>New login ID <input name="login_id" required pattern="[A-Za-z0-9][A-Za-z0-9_.-]{2,99}"></label>
+        <label>Initial password <input name="password" type="password" minlength="12" required></label>
+        <button>Create account</button>
+      </form>
+      <div id="accounts"></div>
+    </section>
+  </main>
+  <script src="/admin/assets/admin.js"></script>
+</body>
+</html>

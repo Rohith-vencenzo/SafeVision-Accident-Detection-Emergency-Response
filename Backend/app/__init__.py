@@ -1,0 +1,1 @@
+"""CrashPulse backend application package."""
