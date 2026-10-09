@@ -72,8 +72,12 @@ def dispatch_pending(db: Session, sender: NotificationSender, limit: int = 50) -
     for outbox in rows:
         device = db.get(Device, outbox.device_id)
         incident = db.get(Incident, outbox.incident_id)
-        owner = db.get(User, incident.owner_id) if incident is not None else None
-        if device is None or incident is None or not device.is_active or device.user_id != incident.owner_id or owner is None or not owner.is_active:
+        recipient = db.get(User, device.user_id) if device is not None else None
+        # Delivery is team-wide, so the guard checks that the DEVICE's own user is
+        # an active reviewer - it deliberately does NOT require that user to own
+        # the incident. Requiring ownership here silently skipped every queued
+        # alert to a second reviewer before it was ever sent.
+        if device is None or incident is None or not device.is_active or recipient is None or not recipient.is_active:
             outbox.status = "SKIPPED"
             continue
         outbox.attempts += 1

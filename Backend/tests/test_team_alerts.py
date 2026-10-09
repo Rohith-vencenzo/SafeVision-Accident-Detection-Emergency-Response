@@ -5,10 +5,12 @@ The SQL predicates are asserted on the generated statement text because that is
 the part a mock cannot otherwise verify.
 """
 import uuid
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
-from app.models import Incident, NotificationOutbox, User
-from app.services.notifications import enqueue_incident_notifications
+from app.models import Device, Incident, NotificationOutbox, User
+from app.security import encrypt_device_token
+from app.services.notifications import dispatch_pending, enqueue_incident_notifications
 
 
 def _incident() -> Incident:
@@ -77,3 +79,85 @@ def test_existing_queue_row_is_not_duplicated():
 
     assert enqueue_incident_notifications(db, _incident()) == 0
     assert db.add.call_count == 0
+
+# ---------------------------------------------------------------------------
+# Dispatch-time guard.
+#
+# Regression coverage: an earlier version re-checked `device.user_id ==
+# incident.owner_id` here. That made every queued alert to a second reviewer
+# SKIPP with zero attempts, so the handset was never contacted even though the
+# outbox row existed. These tests drive the real dispatch loop.
+# ---------------------------------------------------------------------------
+
+
+class _Outbox:
+    def __init__(self, incident_id, device_id):
+        self.id = uuid.uuid4()
+        self.incident_id = incident_id
+        self.device_id = device_id
+        self.status = "PENDING"
+        self.attempts = 0
+        self.next_attempt_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+
+
+def _dispatch_db(outbox, device, recipient):
+    db = MagicMock()
+    db.scalars.return_value = [outbox]
+    db.get.side_effect = lambda model, key: {
+        Device: device,
+        Incident: _incident(),
+        User: recipient,
+    }.get(model)
+    db.commit = MagicMock()
+    return db
+
+
+def test_dispatch_sends_to_a_reviewer_who_does_not_own_the_incident():
+    """The regression: a non-owner reviewer must still be sent the alert."""
+    owner = User(id=uuid.uuid4(), login_id="owner", role="USER", is_active=True)
+    reviewer = User(id=uuid.uuid4(), login_id="reviewer", role="USER", is_active=True)
+    device = MagicMock(id=uuid.uuid4(), user_id=reviewer.id, is_active=True)
+    device.token_ciphertext = encrypt_device_token('valid-fcm-token')[1]
+    incident_id, device_id = uuid.uuid4(), device.id
+    db = _dispatch_db(_Outbox(incident_id, device_id), device, reviewer)
+
+    sent = []
+
+    class Sender:
+        def send(self, *, token, incident_id, safe_summary, occurred_at):
+            sent.append(device_id)
+            return "provider-id"
+
+    delivered = dispatch_pending(db, Sender())
+
+    assert delivered == 1, "a non-owner reviewer must not be skipped"
+    assert sent == [device_id]
+
+
+def test_dispatch_skips_a_deactivated_device():
+    owner = User(id=uuid.uuid4(), login_id="owner", role="USER", is_active=True)
+    reviewer = User(id=uuid.uuid4(), login_id="reviewer", role="USER", is_active=True)
+    device = MagicMock(id=uuid.uuid4(), user_id=reviewer.id, is_active=False)
+    outbox = _Outbox(uuid.uuid4(), device.id)
+    db = _dispatch_db(outbox, device, reviewer)
+
+    class Sender:
+        def send(self, **kwargs):
+            raise AssertionError("must not attempt a deactivated device")
+
+    assert dispatch_pending(db, Sender()) == 0
+    assert outbox.status == "SKIPPED"
+
+
+def test_dispatch_skips_when_the_recipient_account_is_disabled():
+    reviewer = User(id=uuid.uuid4(), login_id="reviewer", role="USER", is_active=False)
+    device = MagicMock(id=uuid.uuid4(), user_id=reviewer.id, is_active=True)
+    outbox = _Outbox(uuid.uuid4(), device.id)
+    db = _dispatch_db(outbox, device, reviewer)
+
+    class Sender:
+        def send(self, **kwargs):
+            raise AssertionError("must not attempt a disabled account")
+
+    assert dispatch_pending(db, Sender()) == 0
+    assert outbox.status == "SKIPPED"
