@@ -17,6 +17,19 @@ from ..schemas import ActionResponse, IncidentActionRequest, IncidentDetailRespo
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
 
+# Incidents are TEAM-WIDE. Reviewing an accident alert is a shared duty, so any
+# signed-in user who has accepted the current Terms may read, review and act on
+# any incident - not only the account that happened to trigger detection.
+#
+# `owner_id` is still recorded on every incident for provenance, and every
+# Ignore / Mark reviewed / Proceeded / location action is still attributed to
+# the individual who performed it. What changed is visibility: a second
+# reviewer's phone receives the alert, so it must also be able to open it
+# instead of receiving an alarm that resolves to 404.
+#
+# Authentication (bearer token) and the Terms gate are unchanged, so this is
+# still strictly an internal, trusted-operator surface.
+
 
 def safe_result(result: dict) -> dict:
     def sanitize(value):
@@ -61,13 +74,13 @@ def _private_file(path_value: str | None) -> Path:
 def list_incidents(current: Annotated[CurrentUser, Depends(require_terms)], db: Annotated[Session, Depends(get_db)], limit: int = 50, offset: int = 0):
     if not 1 <= limit <= 200 or offset < 0:
         raise HTTPException(status_code=422, detail="invalid pagination")
-    rows = db.scalars(select(Incident).where(Incident.owner_id == current.user.id).order_by(Incident.created_at.desc()).offset(offset).limit(limit))
+    rows = db.scalars(select(Incident).order_by(Incident.created_at.desc()).offset(offset).limit(limit))
     return [_response(row) for row in rows]
 
 
 @router.get("/{incident_id}", response_model=IncidentDetailResponse)
 def get_incident(incident_id: UUID, current: Annotated[CurrentUser, Depends(require_terms)], db: Annotated[Session, Depends(get_db)]):
-    incident = db.scalar(select(Incident).where(Incident.id == incident_id, Incident.owner_id == current.user.id))
+    incident = db.scalar(select(Incident).where(Incident.id == incident_id))
     if incident is None:
         raise HTTPException(status_code=404, detail="incident not found")
     actions = db.scalars(select(UserAction).where(UserAction.incident_id == incident.id, UserAction.user_id == current.user.id).order_by(UserAction.created_at)).all()
@@ -77,7 +90,7 @@ def get_incident(incident_id: UUID, current: Annotated[CurrentUser, Depends(requ
 
 @router.get("/{incident_id}/result")
 def get_result(incident_id: UUID, current: Annotated[CurrentUser, Depends(require_terms)], db: Annotated[Session, Depends(get_db)]):
-    incident = db.scalar(select(Incident).where(Incident.id == incident_id, Incident.owner_id == current.user.id))
+    incident = db.scalar(select(Incident).where(Incident.id == incident_id))
     if incident is None:
         raise HTTPException(status_code=404, detail="incident not found")
     return safe_result(json.loads(_private_file(incident.result_reference).read_text(encoding="utf-8")))
@@ -87,7 +100,7 @@ def get_result(incident_id: UUID, current: Annotated[CurrentUser, Depends(requir
 def get_evidence(incident_id: UUID, name: str, current: Annotated[CurrentUser, Depends(require_terms)], db: Annotated[Session, Depends(get_db)]):
     if name not in {"before.jpg", "strongest.jpg", "after.jpg"}:
         raise HTTPException(status_code=404, detail="evidence not found")
-    incident = db.scalar(select(Incident).where(Incident.id == incident_id, Incident.owner_id == current.user.id))
+    incident = db.scalar(select(Incident).where(Incident.id == incident_id))
     if incident is None:
         raise HTTPException(status_code=404, detail="incident not found")
     root = _private_path(incident.evidence_reference, require_file=False)
@@ -107,7 +120,7 @@ def get_evidence(incident_id: UUID, name: str, current: Annotated[CurrentUser, D
 
 @router.get("/{incident_id}/report")
 def get_report(incident_id: UUID, current: Annotated[CurrentUser, Depends(require_terms)], db: Annotated[Session, Depends(get_db)]):
-    incident = db.scalar(select(Incident).where(Incident.id == incident_id, Incident.owner_id == current.user.id))
+    incident = db.scalar(select(Incident).where(Incident.id == incident_id))
     if incident is None:
         raise HTTPException(status_code=404, detail="incident not found")
     view = safe_result(json.loads(_private_file(incident.result_reference).read_text(encoding="utf-8")))
@@ -124,7 +137,7 @@ def record_action(
 ):
     if not idempotency_key:
         raise HTTPException(status_code=400, detail="Idempotency-Key header is required")
-    incident = db.scalar(select(Incident).where(Incident.id == incident_id, Incident.owner_id == current.user.id).with_for_update())
+    incident = db.scalar(select(Incident).where(Incident.id == incident_id).with_for_update())
     if incident is None:
         raise HTTPException(status_code=404, detail="incident not found")
     previous = db.scalar(select(UserAction).where(UserAction.user_id == current.user.id, UserAction.idempotency_key == idempotency_key))
@@ -146,7 +159,7 @@ def record_action(
 def attach_location(incident_id: UUID, payload: LocationAttachmentRequest, current: Annotated[CurrentUser, Depends(require_terms)], db: Annotated[Session, Depends(get_db)], idempotency_key: Annotated[str | None, Header(min_length=1, max_length=200)] = None):
     if not idempotency_key:
         raise HTTPException(status_code=400, detail="Idempotency-Key header is required")
-    incident = db.scalar(select(Incident).where(Incident.id == incident_id, Incident.owner_id == current.user.id).with_for_update())
+    incident = db.scalar(select(Incident).where(Incident.id == incident_id).with_for_update())
     if incident is None:
         raise HTTPException(status_code=404, detail="incident not found")
     previous = db.scalar(select(UserAction).where(UserAction.user_id == current.user.id, UserAction.idempotency_key == idempotency_key))

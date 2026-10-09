@@ -103,7 +103,7 @@ storage configuration, and explicit detector paths during application startup.
 ## Error policy
 
 - `401`: missing, expired, revoked, or invalid session
-- `403`: terms not accepted, wrong role, or unauthorized owner/device
+- `403`: terms not accepted, wrong role, or unauthorized device
 - `409`: reused idempotency key with different data or duplicate resource
 - `413`: upload exceeds configured limit
 - `415`: unsupported video type/container
