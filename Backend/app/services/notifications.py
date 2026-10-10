@@ -30,7 +30,22 @@ class FakeNotificationSender:
 
 
 def enqueue_incident_notifications(db: Session, incident: Incident) -> int:
-    devices = list(db.scalars(select(Device).where(Device.user_id == incident.owner_id, Device.is_active.is_(True))))
+    """Queue one alert per active field-reviewer device.
+
+    Alerts are **team-wide**: every active non-admin account with an active
+    device is paged, not only the incident's owner. Reviewing an incident is a
+    shared duty, so a single pager must not be the only person who can see it.
+    Admin accounts are excluded because they operate the console rather than
+    review incidents in the field.
+
+    Ownership is still recorded on the incident, so provenance and per-user
+    audit actions remain intact.
+    """
+    recipients = list(db.scalars(select(User).where(User.is_active.is_(True), User.role != "ADMIN")))
+    recipient_ids = [user.id for user in recipients]
+    devices = []
+    if recipient_ids:
+        devices = list(db.scalars(select(Device).where(Device.user_id.in_(recipient_ids), Device.is_active.is_(True))))
     added = 0
     for device in devices:
         existing = db.scalar(select(NotificationOutbox).where(NotificationOutbox.incident_id == incident.id, NotificationOutbox.device_id == device.id))
@@ -57,8 +72,12 @@ def dispatch_pending(db: Session, sender: NotificationSender, limit: int = 50) -
     for outbox in rows:
         device = db.get(Device, outbox.device_id)
         incident = db.get(Incident, outbox.incident_id)
-        owner = db.get(User, incident.owner_id) if incident is not None else None
-        if device is None or incident is None or not device.is_active or device.user_id != incident.owner_id or owner is None or not owner.is_active:
+        recipient = db.get(User, device.user_id) if device is not None else None
+        # Delivery is team-wide, so the guard checks that the DEVICE's own user is
+        # an active reviewer - it deliberately does NOT require that user to own
+        # the incident. Requiring ownership here silently skipped every queued
+        # alert to a second reviewer before it was ever sent.
+        if device is None or incident is None or not device.is_active or recipient is None or not recipient.is_active:
             outbox.status = "SKIPPED"
             continue
         outbox.attempts += 1

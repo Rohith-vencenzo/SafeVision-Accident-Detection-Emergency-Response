@@ -226,7 +226,7 @@ College_Proj/
 |   |-- README.md                     <- You are here
 |   |-- LICENSE                       <- Unlicense (public domain)
 |   |-- requirements.txt              <- Pinned Python dependencies
-|   |-- .gitignore                    <- Excludes weights / videos / artifacts
+|   |-- .gitignore                    <- Excludes weights / generated artifacts
 |   |-- config.json                   <- Validated runtime defaults
 |   |
 |   |-- main.py                       <- Video analysis CLI
@@ -273,7 +273,7 @@ College_Proj/
 |   |-- docs/                         <- Architecture, rules, schemas, integration
 |   |-- assets/                       <- Logo and verified-run snapshots
 |   |-- models/                       <- Locally supplied checkpoints (.pt ignored)
-|   |-- test_clip/                    <- Locally supplied footage (.mp4 ignored)
+|   |-- test_clip/                    <- Sample demo clips (committed, ~3.3 MB)
 |   |-- outputs/                      <- Annotated videos / redirected JSON
 |   |-- incidents/                    <- Published detector report bundles
 |   `-- logs/                         <- Runtime caches / local simulation records
@@ -290,6 +290,26 @@ College_Proj/
     |-- LAN_RUNBOOK.md, TESTING.md    <- Trusted-LAN demo procedure
     `-- app/build/outputs/apk/debug/  <- Debug APK artifact
 ```
+
+Every command in this README runs against one of the two sample clips committed
+in `test_clip/`, so a fresh clone can reproduce the results without supplying
+footage:
+
+| Clip | Length | Purpose |
+|---|---|---|
+| `test_clip/accident_demo2.mp4` | ~0.9 MB | Short, fast pass. Confirms an incident early and is what the [Visual Snapshot](#3-visual-snapshot) frames come from |
+| `test_clip/test_in_heavy_traffic.mp4` | ~2.4 MB | Dense traffic; produces **two** confirmed candidates, so it is useful for exercising the alert fan-out to more than one reviewer |
+
+Model **weights are still not committed** - `.pt` files stay excluded and
+`models/yolov11.pt` must be supplied separately. Generated artifacts
+(annotated videos, report bundles, logs) are also excluded.
+
+> **Footage provenance.** These clips are public sample surveillance recordings
+> used for demonstration. They contain **no audio**, and no faces are
+> identifiable at the resolutions shown, but vehicle plates, signage and
+> street-level detail are visible. If you replace them with your own footage for
+> a real deployment, treat that as personal data: it is footage of real places
+> and real vehicles, and it should not be published without a reason.
 
 ---
 

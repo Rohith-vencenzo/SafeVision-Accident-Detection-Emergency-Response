@@ -153,6 +153,14 @@ pure unit/API contract tests still run.
 
 ## Security notes
 
+- Incidents are **team-wide**. Any signed-in user who has accepted the current
+  Terms may read, review and act on any incident, and alerts fan out to every
+  active non-admin account with an active device. Reviewing an accident alert is
+  a shared duty, so a second reviewer's phone is paged - and must be able to open
+  what it receives. `owner_id` is still recorded for provenance, and every
+  Ignore / Mark reviewed / Proceeded / location action is still attributed to
+  the individual who performed it. Admin accounts are excluded from the alert
+  set because they operate the console rather than review in the field.
 - There is no public registration or password-reset endpoint.
 - User passwords are hashed with Argon2id.
 - Refresh sessions are stored as SHA-256 hashes and can be revoked.

@@ -24,6 +24,10 @@ logs/*
 !logs/.gitkeep
 test_clip/*
 !test_clip/.gitkeep
+# The two demo clips ARE committed so that a fresh clone can reproduce the
+# documented commands and the screenshot evidence in README section 3.
+# Generated annotated videos under outputs/ remain excluded.
+!test_clip/*.mp4
 models/*
 !models/.gitkeep
 !models/training-configuration.json
